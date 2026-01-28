@@ -219,9 +219,13 @@ class Client extends EventEmitter {
                  */
             this.emit(Events.AUTHENTICATED, authEventPayload);
 
+            // console.log('DEBUG: Authenticated event emitted'); // DEBUG
+
             const injected = await this.pupPage.evaluate(async () => {
                 return typeof window.Store !== 'undefined' && typeof window.WWebJS !== 'undefined';
             });
+
+            // console.log(`DEBUG: Injected state before logic: ${injected}`); // DEBUG
 
             if (!injected) {
                 if (this.options.webVersionCache.type === 'local' && this.currentIndexHtml) {
@@ -232,8 +236,10 @@ class Client extends EventEmitter {
                 }
 
                 if (isCometOrAbove) {
+                    // console.log('DEBUG: Exposing Store (Comet)'); // DEBUG
                     await this.pupPage.evaluate(ExposeStore);
                 } else {
+                    // console.log('DEBUG: Exposing Legacy Store'); // DEBUG
                     // make sure all modules are ready before injection
                     // 2 second delay after authentication makes sense and does not need to be made dyanmic or removed
                     await new Promise(r => setTimeout(r, 2000));
@@ -247,29 +253,46 @@ class Client extends EventEmitter {
                     if (res) { break; }
                     await new Promise(r => setTimeout(r, 200));
                 }
+
+                // console.log(`DEBUG: Store injection result: ${res}`); // DEBUG
+
                 if (!res) {
                     throw 'ready timeout';
                 }
+
+                // console.log('DEBUG: Store injected, initializing ClientInfo...'); // DEBUG
 
                 /**
                      * Current connection information
                      * @type {ClientInfo}
                      */
-                this.info = new ClientInfo(this, await this.pupPage.evaluate(() => {
-                    return { ...window.Store.Conn.serialize(), wid: window.Store.User.getMaybeMePnUser() || window.Store.User.getMaybeMeLidUser() };
-                }));
+                try {
+                    const infoData = await this.pupPage.evaluate(() => {
+                        return { ...window.Store.Conn.serialize(), wid: window.Store.User.getMaybeMePnUser() || window.Store.User.getMaybeMeLidUser() };
+                    });
+                    this.info = new ClientInfo(this, infoData);
+                    // console.log('DEBUG: ClientInfo initialized'); // DEBUG
+                } catch (err) {
+                    // console.error('DEBUG: Failed to initialize ClientInfo', err); // DEBUG
+                    throw err;
+                }
 
                 this.interface = new InterfaceController(this);
 
+                // console.log('DEBUG: Loading util functions...'); // DEBUG
                 //Load util functions (serializers, helper functions)
                 await this.pupPage.evaluate(LoadUtils);
+                // console.log('DEBUG: Utilities loaded'); // DEBUG
 
+                // console.log('DEBUG: Attaching event listeners...'); // DEBUG
                 await this.attachEventListeners();
+                // console.log('DEBUG: Event listeners attached'); // DEBUG
             }
             /**
                  * Emitted when the client has initialized and is ready to receive messages.
                  * @event Client#ready
                  */
+            // console.log('DEBUG: Emitting READY event'); // DEBUG
             this.emit(Events.READY);
             this.authStrategy.afterAuthReady();
         });
@@ -371,6 +394,12 @@ class Client extends EventEmitter {
         });
 
         await this.inject();
+
+        this.pupPage.on('console', msg => {
+            const type = msg.type();
+            const text = msg.text();
+            console.log(`[Browser ${type}]: ${text}`);
+        });
 
         this.pupPage.on('framenavigated', async (frame) => {
             if (frame.url().includes('post_logout=1') || this.lastLoggedOut) {
@@ -489,6 +518,7 @@ class Client extends EventEmitter {
         let last_message;
 
         await exposeFunctionIfAbsent(this.pupPage, 'onChangeMessageTypeEvent', (msg) => {
+
 
             if (msg.type === 'revoked') {
                 const message = new Message(this, msg);
@@ -747,96 +777,138 @@ class Client extends EventEmitter {
             }
         });
 
-        await this.pupPage.evaluate(() => {
-            window.Store.Msg.on('change', (msg) => { window.onChangeMessageEvent(window.WWebJS.getMessageModel(msg)); });
-            window.Store.Msg.on('change:type', (msg) => { window.onChangeMessageTypeEvent(window.WWebJS.getMessageModel(msg)); });
-            window.Store.Msg.on('change:ack', (msg, ack) => { window.onMessageAckEvent(window.WWebJS.getMessageModel(msg), ack); });
-            window.Store.Msg.on('change:isUnsentMedia', (msg, unsent) => { if (msg.id.fromMe && !unsent) window.onMessageMediaUploadedEvent(window.WWebJS.getMessageModel(msg)); });
-            window.Store.Msg.on('remove', (msg) => { if (msg.isNewMsg) window.onRemoveMessageEvent(window.WWebJS.getMessageModel(msg)); });
-            window.Store.Msg.on('change:body change:caption', (msg, newBody, prevBody) => { window.onEditMessageEvent(window.WWebJS.getMessageModel(msg), newBody, prevBody); });
-            window.Store.AppState.on('change:state', (_AppState, state) => { window.onAppStateChangedEvent(state); });
-            window.Store.Conn.on('change:battery', (state) => { window.onBatteryStateChangedEvent(state); });
-            window.Store.Call.on('add', (call) => { window.onIncomingCall(call); });
-            window.Store.Chat.on('remove', async (chat) => { window.onRemoveChatEvent(await window.WWebJS.getChatModel(chat)); });
-            window.Store.Chat.on('change:archive', async (chat, currState, prevState) => { window.onArchiveChatEvent(await window.WWebJS.getChatModel(chat), currState, prevState); });
-            window.Store.Msg.on('add', (msg) => {
-                if (msg.isNewMsg) {
-                    if (msg.type === 'ciphertext') {
-                        // defer message event until ciphertext is resolved (type changed)
-                        msg.once('change:type', (_msg) => window.onAddMessageEvent(window.WWebJS.getMessageModel(_msg)));
-                        window.onAddMessageCiphertextEvent(window.WWebJS.getMessageModel(msg));
-                    } else {
-                        window.onAddMessageEvent(window.WWebJS.getMessageModel(msg));
-                    }
+        try {
+            await this.pupPage.evaluate(() => {
+                if (window.Store.Msg) {
+                    window.Store.Msg.on('change', (msg) => { window.onChangeMessageEvent(window.WWebJS.getMessageModel(msg)); });
+                    window.Store.Msg.on('change:type', (msg) => { window.onChangeMessageTypeEvent(window.WWebJS.getMessageModel(msg)); });
+                    window.Store.Msg.on('change:ack', (msg, ack) => { window.onMessageAckEvent(window.WWebJS.getMessageModel(msg), ack); });
+                    window.Store.Msg.on('change:isUnsentMedia', (msg, unsent) => { if (msg.id.fromMe && !unsent) window.onMessageMediaUploadedEvent(window.WWebJS.getMessageModel(msg)); });
+                    window.Store.Msg.on('remove', (msg) => { if (msg.isNewMsg) window.onRemoveMessageEvent(window.WWebJS.getMessageModel(msg)); });
+                    window.Store.Msg.on('change:body change:caption', (msg, newBody, prevBody) => { window.onEditMessageEvent(window.WWebJS.getMessageModel(msg), newBody, prevBody); });
+                    window.Store.Msg.on('add', (msg) => {
+                        if (msg.isNewMsg) {
+                            if (msg.type === 'ciphertext') {
+                                // defer message event until ciphertext is resolved (type changed)
+                                msg.once('change:type', (_msg) => window.onAddMessageEvent(window.WWebJS.getMessageModel(_msg)));
+                                window.onAddMessageCiphertextEvent(window.WWebJS.getMessageModel(msg));
+                            } else {
+                                window.onAddMessageEvent(window.WWebJS.getMessageModel(msg));
+                            }
+                        }
+                    });
+                } else {
+                    // console.error('DEBUG: window.Store.Msg is undefined');
+                }
+
+                if (window.Store.Chat) {
+                    window.Store.Chat.on('remove', async (chat) => { window.onRemoveChatEvent(await window.WWebJS.getChatModel(chat)); });
+                    window.Store.Chat.on('change:archive', async (chat, currState, prevState) => { window.onArchiveChatEvent(await window.WWebJS.getChatModel(chat), currState, prevState); });
+                    window.Store.Chat.on('change:unreadCount', (chat) => { window.onChatUnreadCountEvent(chat); });
+                } else {
+                    // console.error('DEBUG: window.Store.Chat is undefined');
+                }
+
+                if (window.Store.AppState) {
+                    window.Store.AppState.on('change:state', (_AppState, state) => { window.onAppStateChangedEvent(state); });
+                } else {
+                    // console.error('DEBUG: window.Store.AppState is undefined');
+                }
+
+                if (window.Store.Conn) {
+                    window.Store.Conn.on('change:battery', (state) => { window.onBatteryStateChangedEvent(state); });
+                } else {
+                    // console.error('DEBUG: window.Store.Conn is undefined');
+                }
+
+                if (window.Store.Call) {
+                    window.Store.Call.on('add', (call) => { window.onIncomingCall(call); });
+                } else {
+                    // console.error('DEBUG: window.Store.Call is undefined');
                 }
             });
-            window.Store.Chat.on('change:unreadCount', (chat) => { window.onChatUnreadCountEvent(chat); });
+        } catch (err) {
+            // console.error('DEBUG: Failed to attach basic listeners', err);
+        }
 
-            if (window.compareWwebVersions(window.Debug.VERSION, '>=', '2.3000.1014111620')) {
-                const module = window.Store.AddonReactionTable;
-                const ogMethod = module.bulkUpsert;
-                module.bulkUpsert = ((...args) => {
-                    window.onReaction(args[0].map(reaction => {
-                        const msgKey = reaction.id;
-                        const parentMsgKey = reaction.reactionParentKey;
-                        const timestamp = reaction.reactionTimestamp / 1000;
-                        const sender = reaction.author ?? reaction.from;
-                        const senderUserJid = sender._serialized;
+        try {
+            await this.pupPage.evaluate(() => {
+                if (window.compareWwebVersions(window.Debug.VERSION, '>=', '2.3000.1014111620')) {
+                    const module = window.Store.AddonReactionTable;
+                    const ogMethod = module.bulkUpsert;
+                    module.bulkUpsert = ((...args) => {
+                        window.onReaction(args[0].map(reaction => {
+                            const msgKey = reaction.id;
+                            const parentMsgKey = reaction.reactionParentKey;
+                            const timestamp = reaction.reactionTimestamp / 1000;
+                            const sender = reaction.author ?? reaction.from;
+                            const senderUserJid = sender._serialized;
 
-                        return { ...reaction, msgKey, parentMsgKey, senderUserJid, timestamp };
-                    }));
+                            return { ...reaction, msgKey, parentMsgKey, senderUserJid, timestamp };
+                        }));
 
-                    return ogMethod(...args);
-                }).bind(module);
+                        return ogMethod(...args);
+                    }).bind(module);
+                }
+            });
+        } catch (err) {
+            // console.error('DEBUG: Failed to attach reaction table listener', err);
+        }
 
-                const pollVoteModule = window.Store.AddonPollVoteTable;
-                const ogPollVoteMethod = pollVoteModule.bulkUpsert;
+        try {
+            await this.pupPage.evaluate(() => {
+                if (window.compareWwebVersions(window.Debug.VERSION, '>=', '2.3000.1014111620')) {
+                    const pollVoteModule = window.Store.AddonPollVoteTable;
+                    const ogPollVoteMethod = pollVoteModule.bulkUpsert;
 
-                pollVoteModule.bulkUpsert = (async (...args) => {
-                    const votes = await Promise.all(args[0].map(async vote => {
-                        const msgKey = vote.id;
-                        const parentMsgKey = vote.pollUpdateParentKey;
-                        const timestamp = vote.t / 1000;
-                        const sender = vote.author ?? vote.from;
-                        const senderUserJid = sender._serialized;
+                    pollVoteModule.bulkUpsert = (async (...args) => {
+                        const votes = await Promise.all(args[0].map(async vote => {
+                            const msgKey = vote.id;
+                            const parentMsgKey = vote.pollUpdateParentKey;
+                            const timestamp = vote.t / 1000;
+                            const sender = vote.author ?? vote.from;
+                            const senderUserJid = sender._serialized;
 
-                        let parentMessage = window.Store.Msg.get(parentMsgKey._serialized);
-                        if (!parentMessage) {
-                            const fetched = await window.Store.Msg.getMessagesById([parentMsgKey._serialized]);
-                            parentMessage = fetched?.messages?.[0] || null;
-                        }
+                            let parentMessage = window.Store.Msg.get(parentMsgKey._serialized);
+                            if (!parentMessage) {
+                                const fetched = await window.Store.Msg.getMessagesById([parentMsgKey._serialized]);
+                                parentMessage = fetched?.messages?.[0] || null;
+                            }
 
-                        return {
-                            ...vote,
-                            msgKey,
-                            sender,
-                            parentMsgKey,
-                            senderUserJid,
-                            timestamp,
-                            parentMessage
-                        };
-                    }));
+                            return {
+                                ...vote,
+                                msgKey,
+                                sender,
+                                parentMsgKey,
+                                senderUserJid,
+                                timestamp,
+                                parentMessage
+                            };
+                        }));
 
-                    window.onPollVoteEvent(votes);
+                        window.onPollVoteEvent(votes);
 
-                    return ogPollVoteMethod.apply(pollVoteModule, args);
-                }).bind(pollVoteModule);
-            } else {
-                const module = window.Store.createOrUpdateReactionsModule;
-                const ogMethod = module.createOrUpdateReactions;
-                module.createOrUpdateReactions = ((...args) => {
-                    window.onReaction(args[0].map(reaction => {
-                        const msgKey = window.Store.MsgKey.fromString(reaction.msgKey);
-                        const parentMsgKey = window.Store.MsgKey.fromString(reaction.parentMsgKey);
-                        const timestamp = reaction.timestamp / 1000;
+                        return ogPollVoteMethod.apply(pollVoteModule, args);
+                    }).bind(pollVoteModule);
+                } else {
+                    const module = window.Store.createOrUpdateReactionsModule;
+                    const ogMethod = module.createOrUpdateReactions;
+                    module.createOrUpdateReactions = ((...args) => {
+                        window.onReaction(args[0].map(reaction => {
+                            const msgKey = window.Store.MsgKey.fromString(reaction.msgKey);
+                            const parentMsgKey = window.Store.MsgKey.fromString(reaction.parentMsgKey);
+                            const timestamp = reaction.timestamp / 1000;
 
-                        return { ...reaction, msgKey, parentMsgKey, timestamp };
-                    }));
+                            return { ...reaction, msgKey, parentMsgKey, timestamp };
+                        }));
 
-                    return ogMethod(...args);
-                }).bind(module);
-            }
-        });
+                        return ogMethod(...args);
+                    }).bind(module);
+                }
+            });
+        } catch (err) {
+            // console.error('DEBUG: Failed to attach poll vote/legacy listener', err);
+        }
     }
 
     async initWebVersionCache() {
@@ -1074,12 +1146,17 @@ class Client extends EventEmitter {
         }
 
         const sentMsg = await this.pupPage.evaluate(async (chatId, content, options, sendSeen) => {
+            debugger;
             const chat = await window.WWebJS.getChat(chatId, { getAsModel: false });
 
             if (!chat) return null;
 
             if (sendSeen) {
-                await window.WWebJS.sendSeen(chatId);
+                try {
+                    await window.WWebJS.sendSeen(chatId);
+                } catch (e) {
+                    console.error('DEBUG: sendSeen failed', e);
+                }
             }
 
             const msg = await window.WWebJS.sendMessage(chat, content, options);
@@ -1230,6 +1307,17 @@ class Client extends EventEmitter {
         }, contactId);
 
         return ContactFactory.create(this, contact);
+    }
+
+    /**
+     * Get LID for a contact ID
+     * @param {string} contactId
+     * @returns {Promise<string|null>}
+     */
+    async getLid(contactId) {
+        return await this.pupPage.evaluate(contactId => {
+            return window.WWebJS.getLid(contactId);
+        }, contactId);
     }
 
     /**

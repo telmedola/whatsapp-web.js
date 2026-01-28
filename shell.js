@@ -15,9 +15,9 @@ console.log('Initializing...');
 //1 ou 0
 const INTERFACE_GUI = 0;
 //MAC
-const LOCAL_BROWSER = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+//const LOCAL_BROWSER = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
 //LINUX
-//const LOCAL_BROWSER = '/usr/bin/google-chrome-stable';
+const LOCAL_BROWSER = '/usr/bin/google-chrome-stable';
 
 let puppOpt;
 
@@ -88,16 +88,32 @@ client.on('authenticated', (session) => {
 client.on('ready', async () => {
     console.log('Client is ready! You can now use the "client" object in the REPL.');
     const chats = await client.getChats();
+    debugger;
     try {
-        await client.sendMessage('5541991519121@c.us', "online: ");
+        const registered = await client.getChatById('554188433383@c.us');
+        //console.log("registered: ", registered);
+        const contact = await client.getContactLidAndPhone('5541991519121@c.us');
+        console.log("contact: ", contact[0]);
+        if (contact && contact.length > 0) {
+            //console.log("Looking for LID...");
+            //const lid = await client.getLid('5541991519121@c.us');
+            //console.log("LID result:", lid);
 
-        await client.sendMessage('554188433383@c.us', "ok");
+            if (contact[0].lid) {
+                await client.sendMessage(contact[0].lid, "ok - com lid");
+            } else {
+                console.log("chat: ", await client.getChatById(contact[0].pn));
+                await client.sendMessage(contact[0].pn, "ok - sem lid");
+            }
+        } else {
+            await client.sendMessage('5541991519121@c.us', "ok - sem lid");
+        }
     } catch (err) {
         console.error('Error sending message:', err);
     }
 
 
-    console.log("chats:", chats);
+    console.log("chats:", chats.length);
 });
 
 /*client.on('ready', () => {

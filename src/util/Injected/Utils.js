@@ -1,6 +1,7 @@
 'use strict';
 
 exports.LoadUtils = () => {
+    // console.log('DEBUG: LoadUtils executing...');
     window.WWebJS = {};
 
     window.WWebJS.forwardMessage = async (chatId, msgId) => {
@@ -10,6 +11,7 @@ exports.LoadUtils = () => {
     };
 
     window.WWebJS.sendSeen = async (chatId) => {
+        console.log('DEBUG: sendSeen called for ' + chatId);
         debugger;
         const chat = await window.WWebJS.getChat(chatId, { getAsModel: false });
         if (chat) {
@@ -22,6 +24,7 @@ exports.LoadUtils = () => {
     };
 
     window.WWebJS.sendMessage = async (chat, content, options = {}) => {
+        console.log('DEBUG: sendMessage called');
         debugger;
         const isChannel = window.Store.ChatGetters.getIsNewsletter(chat);
         const isStatus = window.Store.ChatGetters.getIsBroadcast(chat);
@@ -239,14 +242,40 @@ exports.LoadUtils = () => {
             delete options.invokedBotWid;
         }
 
-        const lidUser = window.Store.User.getMaybeMeLidUser();
-        const meUser = window.Store.User.getMaybeMePnUser();
+        let lidUser, meUser;
+        try {
+            lidUser = window.Store.User.getMaybeMeLidUser();
+            meUser = window.Store.User.getMaybeMePnUser();
+        } catch (e) {
+            console.error('DEBUG: Error retrieving user', e);
+        }
+
+        console.log('DEBUG: lidUser', lidUser);
+        console.log('DEBUG: meUser', meUser);
+        console.log('DEBUG: chat.id.isLid()', chat.id.isLid());
+
+        if (chat.groupMetadata) {
+            console.log('DEBUG: isLidAddressingMode', chat.groupMetadata.isLidAddressingMode);
+        }
+
         const newId = await window.Store.MsgKey.newId();
-        let from = chat.id.isLid() ? lidUser : meUser;
+
+        let from = meUser;
+
+        if (chat.id.isLid()) {
+            if (lidUser) {
+                from = lidUser;
+            } else {
+                console.error('DEBUG: No LID user available for LID chat');
+            }
+        }
+
         let participant;
 
         if (typeof chat.id?.isGroup === 'function' && chat.id.isGroup()) {
-            from = chat.groupMetadata && chat.groupMetadata.isLidAddressingMode ? lidUser : meUser;
+            if (chat.groupMetadata && chat.groupMetadata.isLidAddressingMode && lidUser) {
+                from = lidUser;
+            }
             participant = window.Store.WidFactory.asUserWidOrThrow(from);
         }
 
@@ -563,7 +592,12 @@ exports.LoadUtils = () => {
 
     window.WWebJS.getChat = async (chatId, { getAsModel = true } = {}) => {
         const isChannel = /@\w*newsletter\b/.test(chatId);
-        const chatWid = window.Store.WidFactory.createWid(chatId);
+        let chatWid;
+        try {
+            chatWid = window.Store.WidFactory.createWid(chatId);
+        } catch (e) {
+            throw e;
+        }
         let chat;
 
         if (isChannel) {
@@ -577,7 +611,56 @@ exports.LoadUtils = () => {
                 chat = null;
             }
         } else {
-            chat = window.Store.Chat.get(chatWid) || (await window.Store.FindOrCreateChat.findOrCreateLatestChat(chatWid))?.chat;
+            try {
+                chat = window.Store.Chat.get(chatWid);
+            } catch (e) {
+                // Ignore
+            }
+
+            if (!chat) {
+                try {
+                    const result = await window.Store.FindOrCreateChat.findOrCreateLatestChat(chatWid);
+                    chat = result?.chat;
+                } catch (e) {
+                    // Fallback: create a mock chat object if we can't find/create a real one
+                    // This allows sending messages to new numbers without LIDs
+                    try {
+                        const ChatModel = window.Store.Chat.modelClass;
+                        chat = new ChatModel({ id: chatWid });
+                        chat.t = Date.now() / 1000;
+                        chat.id = chatWid;
+                        chat.isGroup = false;
+                        chat.contact = { id: chatWid };
+                        chat.name = chatId;
+                        chat.isReadOnly = false;
+                        chat.unreadCount = 0;
+                        chat.archive = false;
+
+                        // Ensure msgs collection exists
+                        if (!chat.msgs) {
+                            chat.msgs = new window.Store.Msg.collection();
+                        }
+
+                        // Try to register the chat in the global Store
+                        try {
+                            window.Store.Chat.add(chat);
+                        } catch (addErr) {
+                            console.error('DEBUG: Failed to add mock chat to Store', addErr);
+                        }
+                    } catch (err) {
+                        chat = {
+                            id: chatWid,
+                            isGroup: false,
+                            contact: { id: chatWid },
+                            name: chatId,
+                            isReadOnly: false,
+                            unreadCount: 0,
+                            timestamp: Date.now() / 1000,
+                            archive: false
+                        };
+                    }
+                }
+            }
         }
 
         return getAsModel && chat
@@ -629,7 +712,12 @@ exports.LoadUtils = () => {
     window.WWebJS.getChatModel = async (chat, { isChannel = false } = {}) => {
         if (!chat) return null;
 
-        const model = chat.serialize();
+        let model = {};
+        if (chat.serialize && typeof chat.serialize === 'function') {
+            model = chat.serialize();
+        } else {
+            model = chat;
+        }
         model.isGroup = false;
         model.isMuted = chat.mute?.expiration !== 0;
         if (isChannel) {
@@ -641,7 +729,11 @@ exports.LoadUtils = () => {
         if (chat.groupMetadata) {
             model.isGroup = true;
             const chatWid = window.Store.WidFactory.createWid(chat.id._serialized);
-            await window.Store.GroupMetadata.update(chatWid);
+            if (window.Store.GroupMetadata) {
+                await window.Store.GroupMetadata.update(chatWid);
+            } else {
+                // console.warn('DEBUG: window.Store.GroupMetadata is undefined');
+            }
             chat.groupMetadata.participants._models
                 .filter(x => x.id?._serialized?.endsWith('@lid'))
                 .forEach(x => x.contact?.phoneNumber && (x.id = x.contact.phoneNumber));
@@ -697,19 +789,53 @@ exports.LoadUtils = () => {
     };
 
     window.WWebJS.getContact = async contactId => {
-        const wid = window.Store.WidFactory.createWid(contactId);
-        let contact = await window.Store.Contact.find(wid);
-        if (contact.id._serialized.endsWith('@lid')) {
-            contact.id = contact.phoneNumber;
+        try {
+            const wid = window.Store.WidFactory.createWid(contactId);
+            let contact = await window.Store.Contact.find(wid);
+            if (contact && contact.id && contact.id._serialized && contact.id._serialized.endsWith('@lid')) {
+                contact.id = contact.phoneNumber;
+            }
+            if (window.Store.BusinessProfile) {
+                const bizProfile = await window.Store.BusinessProfile.fetchBizProfile(wid);
+                bizProfile.profileOptions && (contact.businessProfile = bizProfile);
+            }
+            return window.WWebJS.getContactModel(contact);
+        } catch (e) {
+            throw e;
         }
-        const bizProfile = await window.Store.BusinessProfile.fetchBizProfile(wid);
-        bizProfile.profileOptions && (contact.businessProfile = bizProfile);
-        return window.WWebJS.getContactModel(contact);
     };
 
     window.WWebJS.getContacts = () => {
         const contacts = window.Store.Contact.getModelsArray();
         return contacts.map(contact => window.WWebJS.getContactModel(contact));
+    };
+
+    window.WWebJS.getLid = async (chatId) => {
+        const wid = window.Store.WidFactory.createWid(chatId);
+
+        if (window.Store.LidUtils) {
+            try {
+                if (window.Store.LidUtils.getCurrentLid) {
+                    const lid = window.Store.LidUtils.getCurrentLid(wid);
+                    if (lid) return lid._serialized || lid;
+                }
+                if (window.Store.LidUtils.getLatestLid) {
+                    const lid = window.Store.LidUtils.getLatestLid(wid);
+                    if (lid) return lid._serialized || lid;
+                }
+            } catch (e) {
+                // Ignore errors (e.g. invalid get call)
+            }
+        }
+
+        // Try to get from Contact
+        const contact = await window.Store.Contact.find(wid);
+        if (contact) {
+            if (contact.lid) return contact.lid._serialized;
+            if (contact.mappedToLid) return contact.mappedToLid._serialized;
+        }
+
+        return null;
     };
 
     window.WWebJS.mediaInfoToFile = ({ data, mimetype, filename }) => {
