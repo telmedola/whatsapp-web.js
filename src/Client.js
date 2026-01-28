@@ -211,7 +211,11 @@ class Client extends EventEmitter {
             }
         });
 
+        let hasSynced = false;
         await exposeFunctionIfAbsent(this.pupPage, 'onAppStateHasSyncedEvent', async () => {
+            if (hasSynced) return;
+            hasSynced = true;
+
             const authEventPayload = await this.authStrategy.getAuthEventPayload();
             /**
                  * Emitted when authentication is successful
@@ -316,6 +320,11 @@ class Client extends EventEmitter {
             window.AuthStore.Cmd.on('logout', async () => {
                 await window.onLogoutEvent();
             });
+
+            // Check if we are already synced
+            if (window.AuthStore.AppState.hasSynced) {
+                window.onAppStateHasSyncedEvent();
+            }
         });
     }
 
@@ -1146,7 +1155,7 @@ class Client extends EventEmitter {
         }
 
         const sentMsg = await this.pupPage.evaluate(async (chatId, content, options, sendSeen) => {
-            debugger;
+            //debugger;
             const chat = await window.WWebJS.getChat(chatId, { getAsModel: false });
 
             if (!chat) return null;

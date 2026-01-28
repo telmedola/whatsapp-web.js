@@ -11,8 +11,8 @@ exports.LoadUtils = () => {
     };
 
     window.WWebJS.sendSeen = async (chatId) => {
-        console.log('DEBUG: sendSeen called for ' + chatId);
-        debugger;
+        //console.log('DEBUG: sendSeen called for ' + chatId);
+        //debugger;
         const chat = await window.WWebJS.getChat(chatId, { getAsModel: false });
         if (chat) {
             window.Store.WAWebStreamModel.Stream.markAvailable();
@@ -24,8 +24,8 @@ exports.LoadUtils = () => {
     };
 
     window.WWebJS.sendMessage = async (chat, content, options = {}) => {
-        console.log('DEBUG: sendMessage called');
-        debugger;
+        //console.log('DEBUG: sendMessage called');
+        //debugger;
         const isChannel = window.Store.ChatGetters.getIsNewsletter(chat);
         const isStatus = window.Store.ChatGetters.getIsBroadcast(chat);
 
@@ -624,41 +624,16 @@ exports.LoadUtils = () => {
                 } catch (e) {
                     // Fallback: create a mock chat object if we can't find/create a real one
                     // This allows sending messages to new numbers without LIDs
-                    try {
-                        const ChatModel = window.Store.Chat.modelClass;
-                        chat = new ChatModel({ id: chatWid });
-                        chat.t = Date.now() / 1000;
-                        chat.id = chatWid;
-                        chat.isGroup = false;
-                        chat.contact = { id: chatWid };
-                        chat.name = chatId;
-                        chat.isReadOnly = false;
-                        chat.unreadCount = 0;
-                        chat.archive = false;
-
-                        // Ensure msgs collection exists
-                        if (!chat.msgs) {
-                            chat.msgs = new window.Store.Msg.collection();
-                        }
-
-                        // Try to register the chat in the global Store
-                        try {
-                            window.Store.Chat.add(chat);
-                        } catch (addErr) {
-                            console.error('DEBUG: Failed to add mock chat to Store', addErr);
-                        }
-                    } catch (err) {
-                        chat = {
-                            id: chatWid,
-                            isGroup: false,
-                            contact: { id: chatWid },
-                            name: chatId,
-                            isReadOnly: false,
-                            unreadCount: 0,
-                            timestamp: Date.now() / 1000,
-                            archive: false
-                        };
-                    }
+                    chat = {
+                        id: chatWid,
+                        isGroup: false,
+                        contact: { id: chatWid },
+                        name: chatId,
+                        isReadOnly: false,
+                        unreadCount: 0,
+                        timestamp: Date.now() / 1000,
+                        archive: false
+                    };
                 }
             }
         }
