@@ -212,10 +212,7 @@ declare namespace WAWebJS {
         ): Promise<Message>;
 
         /** Send a reaction to a specific messageId */
-        sendReaction(
-            messageId: string,
-            reaction: string,
-        ): Promise<void>;
+        sendReaction(messageId: string, reaction: string): Promise<void>;
 
         /** Sends a channel admin invitation to a user, allowing them to become an admin of the channel */
         sendChannelAdminInvite(
@@ -748,8 +745,7 @@ declare namespace WAWebJS {
         browserName?: string;
         /** Object with proxy autentication requirements @default: undefined */
         proxyAuthentication?:
-            | { username: string; password: string }
-            | undefined;
+            { username: string; password: string } | undefined;
         /** Phone number pairing configuration. Refer the requestPairingCode function of Client.
          * @default
          * {
@@ -782,9 +778,7 @@ declare namespace WAWebJS {
     }
 
     export type WebCacheOptions =
-        | NoWebCacheOptions
-        | LocalWebCacheOptions
-        | RemoteWebCacheOptions;
+        NoWebCacheOptions | LocalWebCacheOptions | RemoteWebCacheOptions;
 
     /**
      * Base class which all authentication strategies extend
