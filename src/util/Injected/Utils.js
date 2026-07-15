@@ -584,12 +584,23 @@ exports.LoadUtils = () => {
             .require('WAWebCollections')
             .Msg.get(newMsgKey._serialized);
 
+        // The sent message can be indexed under a key built with the
+        // chat's sibling wid (lid <-> phone number); the random id part
+        // of the key does not depend on the wid, so look it up directly
+        // in the chat's own collection
+        if (!sentMsg) {
+            sentMsg = chat.msgs
+                .getModelsArray()
+                .find((m) => m.id.id === newMsgKey.id);
+        }
+
+        let altWid;
         if (
             !sentMsg &&
             typeof chat.id?.isUser === 'function' &&
             chat.id.isUser()
         ) {
-            const altWid = window
+            altWid = window
                 .require('WAWebApiContact')
                 .getAlternateUserWid(chat.id);
             if (altWid) {
@@ -600,10 +611,31 @@ exports.LoadUtils = () => {
                     participant: participant,
                     selfDir: 'out',
                 });
-                sentMsg = window
-                    .require('WAWebCollections')
-                    .Msg.get(altMsgKey._serialized);
+                sentMsg =
+                    window
+                        .require('WAWebCollections')
+                        .Msg.get(altMsgKey._serialized) ||
+                    window
+                        .require('WAWebCollections')
+                        .Chat.get(altWid)
+                        ?.msgs.getModelsArray()
+                        .find((m) => m.id.id === newMsgKey.id);
             }
+        }
+
+        // Keep a debug trail so clients can inspect why the sent message
+        // could not be found in the collections
+        if (!sentMsg) {
+            window.WWebJS.lastSendMessageDebug = {
+                newMsgKey: newMsgKey._serialized,
+                chatId: chat.id._serialized,
+                altWid: altWid ? altWid._serialized : null,
+                lastChatMsgKeys: chat.msgs
+                    .getModelsArray()
+                    .slice(-3)
+                    .map((m) => m.id._serialized),
+                time: Date.now(),
+            };
         }
 
         return sentMsg;
