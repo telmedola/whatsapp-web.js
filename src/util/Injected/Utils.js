@@ -580,9 +580,33 @@ exports.LoadUtils = () => {
 
         if (options.waitUntilMsgSent) await sendMsgResultPromise;
 
-        return window
+        let sentMsg = window
             .require('WAWebCollections')
             .Msg.get(newMsgKey._serialized);
+
+        if (
+            !sentMsg &&
+            typeof chat.id?.isUser === 'function' &&
+            chat.id.isUser()
+        ) {
+            const altWid = window
+                .require('WAWebApiContact')
+                .getAlternateUserWid(chat.id);
+            if (altWid) {
+                const altMsgKey = new (window.require('WAWebMsgKey'))({
+                    from: from,
+                    to: altWid,
+                    id: newId,
+                    participant: participant,
+                    selfDir: 'out',
+                });
+                sentMsg = window
+                    .require('WAWebCollections')
+                    .Msg.get(altMsgKey._serialized);
+            }
+        }
+
+        return sentMsg;
     };
 
     window.WWebJS.editMessage = async (msg, content, options = {}) => {
