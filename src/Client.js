@@ -2294,6 +2294,13 @@ class Client extends EventEmitter {
                 .require('WAWebQueryExistsJob')
                 .queryWidExists(wid);
             if (!result || result.wid === undefined) return null;
+            // WhatsApp Web changed _serialized to $1 in id objects (2026-07
+            // update); keep _serialized populated for backward compatibility
+            if (result.wid._serialized == null && result.wid.$1 != null) {
+                return Object.assign({}, result.wid, {
+                    _serialized: result.wid.$1,
+                });
+            }
             return result.wid;
         }, number);
     }
